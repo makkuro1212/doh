@@ -138,7 +138,7 @@ export default {
     const cache = caches.default;
 
     const cacheKey =
-      `https://dns.lan/${body.subarray(2).join('')}|${additionalBytes.join('')}`;
+      `https://dns.lan/v1/${body.subarray(2).join('')}|${additionalBytes.join('')}`;
 
     const cached = await cache.match(cacheKey);
 
@@ -153,11 +153,12 @@ export default {
 
         cachedBody[0] = body[0];
         cachedBody[1] = body[1];
-
+        const responseHeaders = new Headers(cached.headers);
+        responseHeaders.set('X-Cache-Hit', Date.now().toString());
         return new Response(cachedBody, {
           status: cached.status,
           statusText: cached.statusText,
-          headers: cached.headers,
+          headers: responseHeaders,
         });
       }
     }
@@ -181,7 +182,7 @@ export default {
 
     const cacheHeaders = new Headers(response.headers);
     cacheHeaders.set('X-Cache-Time', Date.now().toString());
-
+    cacheHeaders.set('Cache-Control', `public, s-maxage=${CACHE_TTL}`);
     const cacheResponse = new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
