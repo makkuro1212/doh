@@ -68,7 +68,22 @@ export default {
         ? fetch(`${env.UPSTREAM}?dns=${dns}`, { headers }) 
         : new Response('invalid dns message', { status: 400 }); 
     } 
- 
+    
+// 屏蔽 gdmf.apple.com
+const blocked = [4,103,100,109,102,5,97,112,112,108,101,3,99,111,109,0];
+
+let match = true;
+for (let i = 0; i < blocked.length; i++) {
+  if (body[i + 12] !== blocked[i]) {
+    match = false;
+    break;
+  }
+}
+
+if (match) {
+  return new Response(null, { status: 404 });
+}
+    
     if (body[11] === 0) { 
       body[11] = 1; 
  
