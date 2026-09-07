@@ -227,6 +227,9 @@ export default {
 
     const cacheHeaders = new Headers(response.headers);
 
+    cacheHeaders.delete('Expires');
+    cacheHeaders.delete('Alt-Svc');
+    cacheHeaders.delete('Server');    
     cacheHeaders.set(
       'Cache-Control',
       `s-maxage=${CACHE_TTL}`
