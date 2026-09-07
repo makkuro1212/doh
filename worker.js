@@ -93,6 +93,40 @@ const getAdditionalBytes = (ip, isIPv4) => {
   return additionalBytes;
 };
 
+const readName = (body, offset) => {
+  const labels = [];
+
+  while (true) {
+    const length = body[offset++];
+
+    if (length === 0) {
+      break;
+    }
+
+    if ((length & 0xc0) === 0xc0) {
+      const pointer = ((length & 0x3f) << 8) | body[offset++];
+      const result = readName(body, pointer);
+
+      labels.push(result.name);
+
+      break;
+    }
+
+    labels.push(
+      new TextDecoder().decode(
+        body.subarray(offset, offset + length)
+      )
+    );
+
+    offset += length;
+  }
+
+  return {
+    name: labels.join('.'),
+    offset,
+  };
+};
+
 const GDMF_NXDOMAIN = new Uint8Array([
   0, 0,
   0x81, 0x83,
@@ -141,16 +175,9 @@ export default {
       });
     }
 
-    if (
-      body[12] === 4 && body[13] === 103 &&
-      body[14] === 100 && body[15] === 109 &&
-      body[16] === 102 && body[17] === 5 &&
-      body[18] === 97 && body[19] === 112 &&
-      body[20] === 112 && body[21] === 108 &&
-      body[22] === 101 && body[23] === 3 &&
-      body[24] === 99 && body[25] === 111 &&
-      body[26] === 109 && body[27] === 0
-    ) {
+    const { name } = readName(body, 12);
+
+    if (name === 'gdmf.apple.com') {
       const responseBody = new Uint8Array(GDMF_NXDOMAIN);
 
       responseBody[0] = body[0];
@@ -229,7 +256,8 @@ export default {
 
     cacheHeaders.delete('Expires');
     cacheHeaders.delete('Alt-Svc');
-    cacheHeaders.delete('Server');    
+    cacheHeaders.delete('Server');
+
     cacheHeaders.set(
       'Cache-Control',
       `s-maxage=${CACHE_TTL}`
