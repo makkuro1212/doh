@@ -59,33 +59,38 @@ const encodeBase64Url = bytes => {
   return output;
 };
 
-const getAdditionalBytes = (ip, ipv4) => {
-  const bytes = new Uint8Array(
-    ipv4
-      ? [
-          0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0,
-          0x0b, 0, 8, 0, 7, 0, 1, 0x18, 0, 0, 0, 0,
-        ]
-      : [
-          0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0,
-          0x0e, 0, 8, 0, 10, 0, 2, 0x30, 0, 0, 0, 0, 0, 0, 0,
-        ]
-  );
+const getAdditionalBytes = (ip, isIPv4) => {
+  const additionalBytes = isIPv4
+    ? [0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0, 0x0b, 0, 0x08, 0, 0x07, 0, 0x01, 0x18, 0, 0, 0, 0]
+    : [0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0, 0x0e, 0, 0x08, 0, 0x0a, 0, 0x02, 0x30, 0, 0, 0, 0, 0, 0, 0];
 
-  const parts = ip.split(ipv4 ? '.' : ':');
+  if (isIPv4) {
+    const ipParts = ip.split('.')
+    let offset = 19
+    for (let i = 0;i < 3;i++){
+      additionalBytes[offset+i] = +ipParts[i]
+    }
+  } else {
+    const [left, right] = ip.split('::');
 
-  for (let i = 0; i < 3; i++) {
-    const n = parseInt(parts[i], ipv4 ? 10 : 16);
+    const leftParts = left ? left.split(':') : [];
+    const rightParts = right ? right.split(':') : [];
 
-    if (ipv4) {
-      bytes[19 + i] = n;
-    } else {
-      bytes[19 + i * 2] = n >> 8;
-      bytes[20 + i * 2] = n & 255;
+    const ipParts = [
+      ...leftParts,
+      ...Array(8 - leftParts.length - rightParts.length).fill('0'),
+      ...rightParts,
+    ];
+
+    let offset = 19
+    for (let i = 0;i < 3;i++){
+      const hex = parseInt(ipParts[i], 16);
+      additionalBytes[offset+i*2] = hex >> 8
+      additionalBytes[offset+i*2+1] = hex & 0xff
     }
   }
 
-  return bytes;
+  return additionalBytes;
 };
 
 const GDMF_NXDOMAIN = new Uint8Array([
@@ -185,29 +190,22 @@ export default {
     const queryBytes = body.subarray(2);
 
     const cacheKey =
-      `https://dns.lan/v1/${encodeBase64Url(queryBytes)}.${encodeBase64Url(additionalBytes)}`;
+      `https://dns.lan/v2/${encodeBase64Url(queryBytes)}.${encodeBase64Url(additionalBytes)}`;
 
     const cache = caches.default;
     const cached = await cache.match(cacheKey);
 
     if (cached) {
-      const cacheTime = Number(cached.headers.get('X-Cache-Time'));
+      const cachedBody = new Uint8Array(await cached.arrayBuffer());
 
-      if (
-        Number.isFinite(cacheTime) &&
-        Date.now() - cacheTime < CACHE_TTL * 1000
-      ) {
-        const cachedBody = new Uint8Array(await cached.arrayBuffer());
+      cachedBody[0] = body[0];
+      cachedBody[1] = body[1];
 
-        cachedBody[0] = body[0];
-        cachedBody[1] = body[1];
-
-        return new Response(cachedBody, {
-          status: cached.status,
-          statusText: cached.statusText,
-          headers: cached.headers,
-        });
-      }
+      return new Response(cachedBody, {
+        status: cached.status,
+        statusText: cached.statusText,
+        headers: cached.headers,
+      });
     }
 
     const modifiedBody = new Uint8Array(
@@ -231,12 +229,7 @@ export default {
 
     cacheHeaders.set(
       'Cache-Control',
-      `public, s-maxage=${CACHE_TTL}`
-    );
-
-    cacheHeaders.set(
-      'X-Cache-Time',
-      Date.now().toString()
+      `s-maxage=${CACHE_TTL}`
     );
 
     const cacheResponse = new Response(
