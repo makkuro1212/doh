@@ -1,5 +1,7 @@
 const CACHE_TTL = 3600;
 
+const decoder = new TextDecoder();
+
 const headers = {
   accept: 'application/dns-message',
   'content-type': 'application/dns-message',
@@ -113,7 +115,7 @@ const readName = (body, offset) => {
     }
 
     labels.push(
-      new TextDecoder().decode(
+      decoder.decode(
         body.subarray(offset, offset + length)
       )
     );
@@ -169,15 +171,14 @@ export default {
         ? decode(dnsValue)
         : new Uint8Array(await request.arrayBuffer());
     } catch {
-      return fetch(`${env.UPSTREAM}?dns=${dnsValue}`, {
-        method: 'GET',
-        headers,
+      return new Response('bad dns message', {
+        status: 400
       });
     }
 
     const { name } = readName(body, 12);
 
-    if (name === 'gdmf.apple.com') {
+    if (name.toLowerCase() === 'gdmf.apple.com') {
       const responseBody = new Uint8Array(GDMF_NXDOMAIN);
 
       responseBody[0] = body[0];
@@ -191,7 +192,9 @@ export default {
       });
     }
 
-    if (body[11] !== 0x00) {
+    const ARCOUNT = body[10] << 8 | body[11];
+
+    if (ARCOUNT !== 0) {
       return fetch(env.UPSTREAM, {
         method: 'POST',
         headers,
@@ -217,7 +220,7 @@ export default {
     const queryBytes = body.subarray(2);
 
     const cacheKey =
-      `https://dns.lan/v2/${encodeBase64Url(queryBytes)}.${encodeBase64Url(additionalBytes)}`;
+      `https://dns.lan/v3/${encodeBase64Url(queryBytes)}/${encodeBase64Url(additionalBytes)}`;
 
     const cache = caches.default;
     const cached = await cache.match(cacheKey);
@@ -252,16 +255,10 @@ export default {
       return response;
     }
 
-    const cacheHeaders = new Headers(response.headers);
-
-    cacheHeaders.delete('Expires');
-    cacheHeaders.delete('Alt-Svc');
-    cacheHeaders.delete('Server');
-
-    cacheHeaders.set(
-      'Cache-Control',
-      `s-maxage=${CACHE_TTL}`
-    );
+    const cacheHeaders = new Headers({
+      'content-type': 'application/dns-message',
+      'cache-control': `s-maxage=${CACHE_TTL}`,
+    });
 
     const cacheResponse = new Response(
       response.body,
