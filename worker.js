@@ -1,4 +1,5 @@
-const CACHE_TTL = 3600;
+const CACHE_TTL_FACTOR = 2;
+const MAX_CACHE_TTL = 1800;
 
 const decoder = new TextDecoder();
 
@@ -151,14 +152,36 @@ const buildEcs = (ip, isIPv4) => {
 
 const buildCacheKey = (queryBytes, additionalBytes) => {
   return (
-    `https://dns.lan/v4/` +
+    `https://dns.lan/v3/` +
     `${encodeBase64Url(queryBytes)}/` +
     `${encodeBase64Url(additionalBytes)}`
   );
 };
 
-const getDnsTtl = () => {
-  return CACHE_TTL;
+const getDnsTtl = response => {
+  const cacheControl = response.headers.get('cache-control');
+
+  if (!cacheControl) {
+    return null;
+  }
+
+  const sMaxAge = cacheControl.match(
+    /(?:^|,)\s*s-maxage=(\d+)/i
+  );
+
+  if (sMaxAge) {
+    return Number(sMaxAge[1]);
+  }
+
+  const maxAge = cacheControl.match(
+    /(?:^|,)\s*max-age=(\d+)/i
+  );
+
+  if (maxAge) {
+    return Number(maxAge[1]);
+  }
+
+  return null;
 };
 
 const makeNxDomain = body => {
@@ -188,10 +211,10 @@ const makeNxDomain = body => {
   });
 };
 
-const normalizeResponse = response => {
+const normalizeResponse = (response, cacheTtl) => {
   const cacheHeaders = new Headers({
     'content-type': 'application/dns-message',
-    'cache-control': `s-maxage=${getDnsTtl()}`,
+    'cache-control': `s-maxage=${cacheTtl}`,
   });
 
   return new Response(
@@ -324,8 +347,20 @@ export default {
     }
 
     // 9. DNS TTL
+    const upstreamTtl = getDnsTtl(response);
+
+    const cacheTtl = upstreamTtl === null
+      ? MAX_CACHE_TTL
+      : Math.min(
+          upstreamTtl * CACHE_TTL_FACTOR,
+          MAX_CACHE_TTL
+        );
+
     // 10. cache
-    const cacheResponse = normalizeResponse(response);
+    const cacheResponse = normalizeResponse(
+      response,
+      cacheTtl
+    );
 
     ctx.waitUntil(
       cache.put(cacheKey, cacheResponse.clone())
