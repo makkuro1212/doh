@@ -1,4 +1,5 @@
 const CACHE_TTL_FACTOR = 2;
+const MIN_CACHE_TTL = 300;
 const MAX_CACHE_TTL = 1800;
 
 const decoder = new TextDecoder();
@@ -352,7 +353,10 @@ export default {
     const cacheTtl = upstreamTtl === null
       ? MAX_CACHE_TTL
       : Math.min(
-          upstreamTtl * CACHE_TTL_FACTOR,
+          Math.max(
+            upstreamTtl * CACHE_TTL_FACTOR,
+            MIN_CACHE_TTL
+          ),
           MAX_CACHE_TTL
         );
 
